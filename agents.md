@@ -10,7 +10,7 @@ A single-page personal portfolio website for **Sagar Gupta**, a Backend Engineer
 
 - **HTML5** — Semantic, single-page layout
 - **CSS3** — Catppuccin Mocha custom properties, Flexbox, Grid, responsive breakpoints
-- **Vanilla JavaScript** — Intersection Observer scroll animations, mobile hamburger menu, active nav highlighting
+- **Vanilla JavaScript** — Modular section injection via `<script>` templates, Intersection Observer scroll animations, mobile hamburger menu, active nav highlighting
 - **Google Fonts** — Space Grotesk (headings), Inter (body), JetBrains Mono (code)
 
 ---
@@ -75,7 +75,16 @@ my-portfolio/
 ├── styles/
 │   └── main.css            # All styles (Catppuccin, responsive, animations)
 ├── scripts/
-│   └── main.js             # Scroll animations, mobile menu, nav highlighting
+│   └── main.js             # Section injection, scroll animations, mobile menu
+├── sections/
+│   ├── hero.js             # Hero section template
+│   ├── about.js            # About section template
+│   ├── experience.js       # Experience timeline template
+│   ├── skills.js           # Skills tags template
+│   ├── projects.js         # Project cards template
+│   ├── education.js        # Education card template
+│   ├── blog.js             # Blog coming soon template
+│   └── contact.js          # Contact links template
 ├── assets/
 │   └── images/
 │       └── photo.jpeg      # Profile photo

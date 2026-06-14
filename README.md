@@ -6,7 +6,7 @@ Single-page personal portfolio website for **Sagar Gupta**, a Backend Engineer w
 
 - **HTML5** — Semantic markup
 - **CSS3** — Custom properties (Catppuccin Mocha), Flexbox, Grid
-- **Vanilla JavaScript** — Intersection Observer, scroll animations, mobile menu
+- **Vanilla JavaScript** — Modular section injection via `<script>` templates, Intersection Observer scroll animations, mobile menu
 - **Zero build tools, zero frameworks** (only Google Fonts CDN)
 
 ## Design
@@ -32,22 +32,32 @@ Single-page personal portfolio website for **Sagar Gupta**, a Backend Engineer w
 
 ```
 my-portfolio/
-├── index.html          # Main HTML (single page)
+├── index.html              # Shell: nav, placeholders, back-to-top
 ├── styles/
-│   └── main.css        # All styles
+│   └── main.css            # Catppuccin Mocha theme, responsive, animations
 ├── scripts/
-│   └── main.js         # JavaScript (scroll animations, mobile menu)
+│   └── main.js             # Section injection, scroll animations, mobile menu
+├── sections/
+│   ├── hero.js             # Hero section template
+│   ├── about.js            # About section template
+│   ├── experience.js       # Experience timeline template
+│   ├── skills.js           # Skills tags template
+│   ├── projects.js         # Project cards template
+│   ├── education.js        # Education card template
+│   ├── blog.js             # Blog coming soon template
+│   └── contact.js          # Contact links template
 ├── assets/
-│   └── images/         # Images (future use)
-├── newCV.pdf           # Resume download
-└── README.md           # This file
+│   └── images/
+│       └── photo.jpeg      # Profile photo
+├── newCV.pdf               # Downloadable resume
+└── README.md               # This file
 ```
 
 ## Local Development
 
-Open `index.html` directly in a browser — no server required.
+Open `index.html` directly in a browser — no server required. Sections are loaded via `<script>` tags so everything works on `file://` protocol.
 
-Or use any static server:
+Or serve with any static server:
 
 ```bash
 python3 -m http.server 8000
