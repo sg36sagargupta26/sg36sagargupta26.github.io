@@ -2,15 +2,13 @@
    Portfolio Website — main.js
    ======================================== */
 
-document.addEventListener('DOMContentLoaded', () => {
+(function () {
 
     // ---------- DOM References ----------
     const navbar = document.getElementById('navbar');
     const navLinks = document.getElementById('navLinks');
     const hamburger = document.getElementById('hamburger');
-    const allNavLinks = document.querySelectorAll('.nav-link');
-    const sections = document.querySelectorAll('section[id]');
-    const revealElements = document.querySelectorAll('.reveal');
+    const mainContent = document.getElementById('main-content');
 
     // ---------- Mobile Menu ----------
     let overlay = null;
@@ -19,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay = document.createElement('div');
         overlay.className = 'nav-overlay';
         document.body.appendChild(overlay);
-
         overlay.addEventListener('click', closeMenu);
     }
 
@@ -37,80 +34,110 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.style.overflow = '';
     }
 
-    hamburger.addEventListener('click', () => {
-        if (navLinks.classList.contains('active')) {
-            closeMenu();
-        } else {
-            openMenu();
-        }
-    });
-
-    // Close menu when a nav link is clicked (mobile)
-    allNavLinks.forEach(link => {
-        link.addEventListener('click', () => {
-            if (navLinks.classList.contains('active')) {
-                closeMenu();
-            }
-        });
+    hamburger.addEventListener('click', function () {
+        navLinks.classList.contains('active') ? closeMenu() : openMenu();
     });
 
     createOverlay();
 
-    // ---------- Navbar scroll effect ----------
-    window.addEventListener('scroll', () => {
-        if (window.scrollY > 50) {
-            navbar.classList.add('scrolled');
-        } else {
-            navbar.classList.remove('scrolled');
+    // ---------- Inject Section Templates ----------
+    var sectionMap = {
+        hero: window.SEThero,
+        about: window.SETabout,
+        experience: window.SETexperience,
+        skills: window.SETskills,
+        projects: window.SETprojects,
+        education: window.SETeducation,
+        blog: window.SETblog,
+        contact: window.SETcontact
+    };
+
+    var sectionOrder = ['hero', 'about', 'experience', 'skills', 'projects', 'education', 'blog', 'contact'];
+
+    sectionOrder.forEach(function (name) {
+        var placeholder = mainContent.querySelector('[data-section="' + name + '"]');
+        if (placeholder && sectionMap[name]) {
+            placeholder.outerHTML = sectionMap[name];
         }
     });
 
-    // ---------- Active nav link on scroll ----------
-    function setActiveNavLink() {
-        let currentSectionId = '';
+    // ---------- Re-attach nav link listeners ----------
+    (function () {
+        var links = document.querySelectorAll('.nav-link');
+        for (var i = 0; i < links.length; i++) {
+            links[i].addEventListener('click', function () {
+                if (navLinks.classList.contains('active')) {
+                    closeMenu();
+                }
+            });
+        }
+    })();
 
-        sections.forEach(section => {
-            const sectionTop = section.offsetTop - 100;
-            const sectionHeight = section.offsetHeight;
-            if (window.scrollY >= sectionTop && window.scrollY < sectionTop + sectionHeight) {
-                currentSectionId = section.getAttribute('id');
+    // ---------- Navbar scroll & active link ----------
+    (function () {
+        var sections = document.querySelectorAll('section[id]');
+        var links = document.querySelectorAll('.nav-link');
+
+        function onScroll() {
+            if (window.scrollY > 50) {
+                navbar.classList.add('scrolled');
+            } else {
+                navbar.classList.remove('scrolled');
             }
-        });
 
-        allNavLinks.forEach(link => {
-            link.classList.remove('active');
-            if (link.getAttribute('href') === `#${currentSectionId}`) {
-                link.classList.add('active');
+            var currentId = '';
+            for (var i = 0; i < sections.length; i++) {
+                var top = sections[i].offsetTop - 100;
+                if (window.scrollY >= top && window.scrollY < top + sections[i].offsetHeight) {
+                    currentId = sections[i].getAttribute('id');
+                }
             }
-        });
-    }
 
-    window.addEventListener('scroll', setActiveNavLink);
+            for (var j = 0; j < links.length; j++) {
+                links[j].classList.remove('active');
+                if (links[j].getAttribute('href') === '#' + currentId) {
+                    links[j].classList.add('active');
+                }
+            }
+        }
 
-    // ---------- Reveal on scroll (Intersection Observer) ----------
-    const revealObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry, index) => {
-            if (entry.isIntersecting) {
-                // Stagger: delay each element slightly
-                const delay = Array.from(revealElements).indexOf(entry.target) * 0;
-                setTimeout(() => {
+        window.addEventListener('scroll', onScroll, { passive: true });
+    })();
+
+    // ---------- Reveal on scroll ----------
+    (function () {
+        var revealEls = document.querySelectorAll('.reveal');
+
+        if (!('IntersectionObserver' in window)) {
+            // Fallback: show all immediately
+            for (var i = 0; i < revealEls.length; i++) {
+                revealEls[i].classList.add('visible');
+            }
+            return;
+        }
+
+        var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
                     entry.target.classList.add('visible');
-                }, delay);
-                revealObserver.unobserve(entry.target);
-            }
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, {
+            threshold: 0.15,
+            rootMargin: '0px 0px -50px 0px'
         });
-    }, {
-        threshold: 0.15,
-        rootMargin: '0px 0px -50px 0px'
-    });
 
-    revealElements.forEach(el => revealObserver.observe(el));
+        for (var k = 0; k < revealEls.length; k++) {
+            observer.observe(revealEls[k]);
+        }
+    })();
 
-    // ---------- Smooth close menu on Escape ----------
-    document.addEventListener('keydown', (e) => {
+    // ---------- Close mobile menu on Escape ----------
+    document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && navLinks.classList.contains('active')) {
             closeMenu();
         }
     });
 
-});
+})();
