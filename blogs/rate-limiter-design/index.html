@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Evolution of a Rate Limiter in Spring Boot — from naive in-memory counter to production-ready Redis-backed distributed rate limiting.">
+    <meta property="og:title" content="Designing a Rate Limiter in Spring Boot — From Naive to Production-Ready">
+    <meta property="og:description" content="Step-by-step evolution: ConcurrentHashMap → Sliding Window → Thread Safety → Multi-Instance → Redis. With code examples.">
+    <meta property="og:type" content="article">
+    <title>Designing a Rate Limiter in Spring Boot — From Naive to Production-Ready</title>
+
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../../styles/main.css">
+    <link rel="stylesheet" href="../../styles/blog.css">
+</head>
+<body>
+
+    <nav class="navbar scrolled" id="navbar">
+        <div class="nav-container container">
+            <a href="../../#hero" class="nav-logo">SG</a>
+            <ul class="nav-links">
+                <li><a href="../../#hero" class="nav-link">Home</a></li>
+                <li><a href="../../#about" class="nav-link">About</a></li>
+                <li><a href="../../#experience" class="nav-link">Experience</a></li>
+                <li><a href="../../#skills" class="nav-link">Skills</a></li>
+                <li><a href="../../#projects" class="nav-link">Projects</a></li>
+                <li><a href="../../#education" class="nav-link">Education</a></li>
+                <li><a href="/blogs/" class="nav-link active">Blog</a></li>
+                <li><a href="../../#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="blog-page">
+        <div class="container">
+            <article class="blog-post">
+                <a href="/blogs/" class="back-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    All Posts
+                </a>
+
+                <header class="blog-post-header">
+                    <h1>Designing a Rate Limiter in Spring Boot — From Naive to Production-Ready</h1>
+                    <div class="blog-post-meta">June 14, 2026 &bull; 12 min read &bull; Spring Boot, LLD, Rate Limiting, Redis, Concurrency</div>
+                </header>
+
+                <div class="blog-post-body">
+
+                    <p>Rate limiting is one of those features that <strong>starts deceptively simple</strong> — a counter, a map, maybe a cron job. But as you peel the layers, you hit concurrency, race conditions, distributed state, and performance tradeoffs. This post walks through the <strong>evolution of a rate limiter in Spring Boot</strong>, mirroring what a real LLD interview might look like: start naive, get challenged, iterate.</p>
+
+                    <p>We'll implement it as a <strong>HandlerInterceptor</strong> (the Spring Boot way), though a Servlet Filter works equally well.</p>
+
+                    <hr>
+
+                    <h2>V1: Naive Counter with Cron Reset</h2>
+                    <p>Our first instinct: store a count per user in a <code>ConcurrentHashMap</code>, reset every minute with a scheduled task.</p>
+
+                    <pre><code>@Component
+public class RateLimitInterceptor implements HandlerInterceptor {
+
+    private final ConcurrentHashMap<String, Integer> counts = new ConcurrentHashMap<>();
+    private static final int MAX_REQUESTS = 100;
+
+    @Override
+    public boolean preHandle(HttpServletRequest request,
+                             HttpServletResponse response,
+                             Object handler) throws Exception {
+
+        String userId = request.getHeader("X-User-Id"); // or IP
+        int current = counts.merge(userId, 1, Integer::sum);
+
+        if (current > MAX_REQUESTS) {
+            response.setStatus(429);
+            response.getWriter().write("{\"error\":\"Too Many Requests\"}");
+            return false;
+        }
+        return true;
+    }
+
+    @Scheduled(fixedRate = 60_000)
+    public void resetCounts() {
+        counts.clear();
+    }
+}</code></pre>
+
+                    <h3>The Problem</h3>
+                    <p>At <strong>second 59</strong> of minute N, a user sends 100 requests. At <strong>second 1</strong> of minute N+1, the map clears and they send another 100. That's <strong>200 requests in ~2 seconds</strong> — the rate limiter failed.</p>
+
+                    <div class="design-note">
+                        <strong>Design lesson:</strong> A fixed-window reset creates a boundary condition where 2× the limit passes in a burst. This is why sliding windows exist.
+                    </div>
+
+                    <hr>
+
+                    <h2>V2: Sliding Window with Timestamp List</h2>
+                    <p>Instead of just a count, we store the <strong>list of timestamps</strong> per user. On each request, we clean old entries and check the window size.</p>
+
+                    <pre><code>@Component
+public class RateLimitInterceptor implements HandlerInterceptor {
+
+    private final ConcurrentHashMap<String, List<Long>> timestamps = new ConcurrentHashMap<>();
+    private static final int MAX_REQUESTS = 100;
+    private static final long WINDOW_MS = 60_000;
+
+    @Override
+    public boolean preHandle(HttpServletRequest request,
+                             HttpServletResponse response,
+                             Object handler) throws Exception {
+
+        String userId = request.getHeader("X-User-Id");
+        long now = System.currentTimeMillis();
+        long cutoff = now - WINDOW_MS;
+
+        List<Long> userTimestamps = timestamps.computeIfAbsent(
+            userId, k -> new ArrayList<>()
+        );
+
+        // Remove expired timestamps
+        userTimestamps.removeIf(ts -> ts < cutoff);
+        userTimestamps.add(now);
+
+        if (userTimestamps.size() > MAX_REQUESTS) {
+            response.setStatus(429);
+            response.getWriter().write("{\"error\":\"Too Many Requests\"}");
+            return false;
+        }
+        return true;
+    }
+
+    @Scheduled(fixedRate = 60_000)
+    public void cleanupOldUsers() {
+        long cutoff = System.currentTimeMillis() - WINDOW_MS;
+        timestamps.entrySet().removeIf(entry ->
+            entry.getValue().isEmpty() ||
+            entry.getValue().get(entry.getValue().size() - 1) < cutoff
+        );
+    }
+}</code></pre>
+
+                    <p>Now a user genuinely limited to 100/min can't burst 200. The cleanup cron removes stale users from memory.</p>
+
+                    <h3>The Problem</h3>
+                    <p>Two threads for the <strong>same user</strong> can both read, modify, and write the list simultaneously — classic <strong>check-then-act race condition</strong>. Under 1000 concurrent requests, the list might miss counts or double-count.</p>
+
+                    <hr>
+
+                    <h2>V3: Thread Safety with Synchronized Blocks</h2>
+                    <p>Add a <code>synchronized</code> block around list access per user:</p>
+
+                    <pre><code>@Override
+public boolean preHandle(HttpServletRequest request,
+                         HttpServletResponse response,
+                         Object handler) throws Exception {
+
+    String userId = request.getHeader("X-User-Id");
+    long now = System.currentTimeMillis();
+    long cutoff = now - WINDOW_MS;
+
+    List<Long> userTimestamps = timestamps.computeIfAbsent(
+        userId, k -> new ArrayList<>()
+    );
+
+    synchronized (userTimestamps) {
+        userTimestamps.removeIf(ts -> ts < cutoff);
+        userTimestamps.add(now);
+
+        if (userTimestamps.size() > MAX_REQUESTS) {
+            response.setStatus(429);
+            response.getWriter().write("{\"error\":\"Too Many Requests\"}");
+            return false;
+        }
+    }
+    return true;
+}</code></pre>
+
+                    <h3>The Problem</h3>
+                    <p>If we used a <code>CopyOnWriteArrayList</code>, the synchronized block becomes redundant — CoW lists are already thread-safe for reads and writes. But <code>CopyOnWriteArrayList</code> copies the entire array on every write, which is <strong>expensive under high throughput</strong>. For this use case, a plain <code>ArrayList</code> (or <code>ArrayDeque</code>) under a lock is better. We switch to <code>ArrayDeque</code> for efficient head removal:</p>
+
+                    <pre><code>private final ConcurrentHashMap<String, ArrayDeque<Long>> timestamps = new ConcurrentHashMap<>();
+
+// Inside the synchronized block:
+ArrayDeque<Long> deque = timestamps.computeIfAbsent(userId, k -> new ArrayDeque<>());
+synchronized (deque) {
+    while (!deque.isEmpty() && deque.peek() < cutoff) {
+        deque.poll();
+    }
+    deque.add(now);
+    if (deque.size() > MAX_REQUESTS) { /* 429 */ }
+}</code></pre>
+
+                    <hr>
+
+                    <h2>V4: Multi-Instance Consistency</h2>
+                    <p>So far, the rate limiter lives in <strong>application memory</strong>. If you deploy 3 instances of your Spring Boot service behind a load balancer, each has its own map. A user can hit instance-1 100 times, then instance-2 100 times — <strong>300 requests slip through</strong>.</p>
+
+                    <p>First instinct: replace the in-memory map with a <strong>database table</strong>:</p>
+
+                    <pre><code>CREATE TABLE rate_limits (
+    user_id VARCHAR(64) NOT NULL,
+    request_time BIGINT NOT NULL,
+    INDEX idx_user_time (user_id, request_time)
+);
+
+-- Cleanup every hour
+DELETE FROM rate_limits WHERE request_time < ?;</code></pre>
+
+                    <pre><code>// In the interceptor:
+@Autowired
+private JdbcTemplate jdbcTemplate;
+
+@Override
+public boolean preHandle(HttpServletRequest request, ...) {
+    String userId = request.getHeader("X-User-Id");
+    long now = System.currentTimeMillis();
+    long cutoff = now - WINDOW_MS;
+
+    // Clean old entries for this user
+    jdbcTemplate.update(
+        "DELETE FROM rate_limits WHERE user_id = ? AND request_time < ?",
+        userId, cutoff
+    );
+
+    // Count remaining
+    Integer count = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM rate_limits WHERE user_id = ?",
+        Integer.class, userId
+    );
+
+    if (count != null && count >= MAX_REQUESTS) {
+        response.setStatus(429);
+        return false;
+    }
+
+    // Insert this request
+    jdbcTemplate.update(
+        "INSERT INTO rate_limits (user_id, request_time) VALUES (?, ?)",
+        userId, now
+    );
+    return true;
+}</code></pre>
+
+                    <h3>The Problem</h3>
+                    <p>Every request now hits <strong>disk I/O</strong> — a DELETE, a SELECT COUNT, and an INSERT. This adds <strong>10-50ms latency</strong> per request. For a rate limiter (which should be near-zero overhead), this is unacceptable. Plus, the DB becomes a bottleneck under high traffic.</p>
+
+                    <div class="design-note">
+                        <strong>Design lesson:</strong> Databases are for durable state, not transient, high-frequency counters. When your hot path hits disk, you've chosen the wrong tool.
+                    </div>
+
+                    <hr>
+
+                    <h2>V5: Redis — In-Memory, Distributed, with Native TTL</h2>
+                    <p><strong>Redis</strong> is the right tool here: in-memory = fast, distributed = multi-instance consistent, and it has built-in TTL and data structures purpose-built for rate limiting.</p>
+
+                    <p>Approach: store a <strong>Sorted Set</strong> per user where the score is the timestamp and the member is a unique request ID.</p>
+
+                    <pre><code>@Component
+public class RedisRateLimitInterceptor implements HandlerInterceptor {
+
+    private final StringRedisTemplate redis;
+    private static final int MAX_REQUESTS = 100;
+    private static final long WINDOW_SECONDS = 60;
+
+    public RedisRateLimitInterceptor(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
+
+    @Override
+    public boolean preHandle(HttpServletRequest request,
+                             HttpServletResponse response,
+                             Object handler) throws Exception {
+
+        String userId = request.getHeader("X-User-Id");
+        String key = "rate_limit:" + userId;
+        long now = System.currentTimeMillis();
+        long cutoff = now - (WINDOW_SECONDS * 1000);
+        String member = now + ":" + UUID.randomUUID().toString().substring(0, 8);
+
+        // Lua script to do everything atomically in Redis
+        String script = """
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1])
+            local count = redis.call('ZCARD', KEYS[1])
+            if count >= tonumber(ARGV[3]) then
+                return 0
+            end
+            redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
+            redis.call('EXPIRE', KEYS[1], ARGV[5])
+            return 1
+            """;
+
+        Long result = redis.execute(
+            new DefaultRedisScript<>(script, Long.class),
+            List.of(key),
+            String.valueOf(cutoff),
+            String.valueOf(now),
+            String.valueOf(MAX_REQUESTS),
+            member,
+            String.valueOf(WINDOW_SECONDS + 10)
+        );
+
+        if (result != null && result == 0L) {
+            response.setStatus(429);
+            response.getWriter().write("{\"error\":\"Too Many Requests\"}");
+            return false;
+        }
+        return true;
+    }
+}</code></pre>
+
+                    <h3>Why a Lua Script?</h3>
+                    <p>Redis operations are atomic individually, but we need <strong>multiple operations to be atomic together</strong>: remove expired entries → count → check limit → add. A Lua script runs as a single atomic unit on the Redis server — no race conditions, even across instances.</p>
+
+                    <h3>Why Sorted Set (ZSET)?</h3>
+                    <p>ZSET gives us <code>ZREMRANGEBYSCORE</code> (remove by timestamp range in O(log N)) and <code>ZCARD</code> (count in O(1)). Together, a sliding window rate check is essentially two O(log N) operations. Much faster than iterating a list.</p>
+
+                    <hr>
+
+                    <h2>V6: Production Hardening</h2>
+
+                    <p>A few more considerations for a truly production-ready implementation:</p>
+
+                    <h3>1. Choose the right algorithm</h3>
+                    <p>The sliding window log (storing every timestamp) works but uses memory proportional to request count. Alternatives:</p>
+
+                    <table class="compare-table">
+                        <tr>
+                            <th>Algorithm</th>
+                            <th>Memory</th>
+                            <th>Accuracy</th>
+                            <th>When to Use</th>
+                        </tr>
+                        <tr>
+                            <td>Fixed Window</td>
+                            <td>O(1)</td>
+                            <td>Poor (boundary bursts)</td>
+                            <td>Never in production</td>
+                        </tr>
+                        <tr>
+                            <td>Sliding Window Log</td>
+                            <td>O(requests)</td>
+                            <td>Perfect</td>
+                            <td>Low-volume APIs</td>
+                        </tr>
+                        <tr>
+                            <td>Sliding Window Counter</td>
+                            <td>O(1)</td>
+                            <td>~Good (approximate)</td>
+                            <td>High-volume APIs</td>
+                        </tr>
+                        <tr>
+                            <td>Token Bucket</td>
+                            <td>O(1)</td>
+                            <td>Good, allows bursts</td>
+                            <td>Burst-tolerant APIs</td>
+                        </tr>
+                    </table>
+
+                    <h3>2. Redis as a dependency — what if it's down?</h3>
+                    <p>Rate limiting is a <strong>defense mechanism</strong>, not core business logic. If Redis is down:</p>
+                    <ul>
+                        <li><strong>Fail open:</strong> Allow all requests (risk of overload)</li>
+                        <li><strong>Fail closed:</strong> Block all requests (risk of outage)</li>
+                    </ul>
+                    <p>In most cases, <strong>fail open with degraded local fallback</strong> is the right tradeoff — switch to an in-memory map with a warning log.</p>
+
+                    <h3>3. Rate limit by what key?</h3>
+                    <p>Not just userId. A production system needs:</p>
+                    <ul>
+                        <li><strong>Per IP:</strong> Basic DDoS protection (can be spoofed, but helps)</li>
+                        <li><strong>Per API Key / User:</strong> Tiered access (free tier = 10/min, premium = 1000/min)</li>
+                        <li><strong>Per Endpoint:</strong> <code>/login</code> gets stricter limits than <code>/search</code></li>
+                        <li><strong>Global:</strong> Absolute cap across all users to protect the entire system</li>
+                    </ul>
+
+                    <h3>4. Response Headers</h3>
+                    <p>Always include rate limit headers so clients can self-regulate:</p>
+                    <pre><code>response.setHeader("X-RateLimit-Limit", String.valueOf(MAX_REQUESTS));
+response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
+response.setHeader("X-RateLimit-Reset", String.valueOf(windowEndEpochSeconds));</code></pre>
+
+                    <hr>
+
+                    <h2>Summary: The Evolution Path</h2>
+
+                    <table class="compare-table">
+                        <tr><th>Version</th><th>What changed</th><th>Why</th></tr>
+                        <tr><td>V1</td><td>ConcurrentHashMap + cron reset</td><td>Fixed window burst vulnerability</td></tr>
+                        <tr><td>V2</td><td>List&lt;Timestamp&gt; sliding window</td><td>Accurate boundary checking</td></tr>
+                        <tr><td>V3</td><td>Synchronized block + ArrayDeque</td><td>Thread safety under concurrency</td></tr>
+                        <tr><td>V4</td><td>Database table</td><td>Multi-instance (failed — too slow)</td></tr>
+                        <tr><td>V5</td><td>Redis Sorted Set + Lua</td><td>Distributed, atomic, fast</td></tr>
+                        <tr><td>V6</td><td>Token bucket, fail-open, headers</td><td>Production hardening</td></tr>
+                    </table>
+
+                    <blockquote>Good LLD isn't about getting the final answer on the first try. It's about identifying the tradeoffs at each step and converging toward a design that balances correctness, performance, and operability.</blockquote>
+
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- Back to Top -->
+    <div class="back-to-top-wrapper">
+        <a href="#" class="back-to-top" aria-label="Back to top">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+        </a>
+    </div>
+
+</body>
+</html>
