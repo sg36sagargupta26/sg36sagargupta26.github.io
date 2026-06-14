@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Designing an API Gateway in Java — from linear proxy to production-grade filter chain with service discovery, load balancing, resilience, and observability.">
+    <meta property="og:title" content="Designing an API Gateway in Java — From Linear Proxy to Production-Grade">
+    <meta property="og:description" content="Step-by-step evolution: routing → filter chain → load balancing → service discovery → circuit breaker → observability. With architecture diagrams and code.">
+    <meta property="og:type" content="article">
+    <title>Designing an API Gateway in Java — From Linear Proxy to Production-Grade</title>
+
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../../styles/main.css">
+    <link rel="stylesheet" href="../../styles/blog.css">
+</head>
+<body>
+
+    <nav class="navbar scrolled" id="navbar">
+        <div class="nav-container container">
+            <a href="../../#hero" class="nav-logo">SG</a>
+            <ul class="nav-links">
+                <li><a href="../../#hero" class="nav-link">Home</a></li>
+                <li><a href="../../#about" class="nav-link">About</a></li>
+                <li><a href="../../#experience" class="nav-link">Experience</a></li>
+                <li><a href="../../#skills" class="nav-link">Skills</a></li>
+                <li><a href="../../#projects" class="nav-link">Projects</a></li>
+                <li><a href="../../#education" class="nav-link">Education</a></li>
+                <li><a href="/blogs/" class="nav-link active">Blog</a></li>
+                <li><a href="../../#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="blog-page">
+        <div class="container">
+            <article class="blog-post">
+                <a href="/blogs/" class="back-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    All Posts
+                </a>
+
+                <header class="blog-post-header">
+                    <h1>Designing an API Gateway in Java — From Linear Proxy to Production-Grade</h1>
+                    <div class="blog-post-meta">June 14, 2026 &bull; 15 min read &bull; LLD, API Gateway, Service Discovery, Resilience</div>
+                </header>
+
+                <div class="blog-post-body">
+
+                    <p>An API Gateway is the <strong>single entry point</strong> for all client requests in a microservices architecture. It handles routing, authentication, rate limiting, load balancing, and resilience — all <strong>before</strong> a request reaches your backend. But most candidates describe it as "a proxy that forwards requests" and stop there. This post walks through the <strong>full evolution</strong> of an API Gateway design — from a linear, naive proxy to a production-grade system.</p>
+
+                    <hr>
+
+                    <h2>V1: The Linear Proxy (MVP Brainstorm)</h2>
+
+                    <p>When asked "design an API Gateway," most engineers start with a feature list. Here's what a typical MVP brainstorming session looks like:</p>
+
+                    <pre><code>MVP Features (initial pass):
+1. Routing           — match path → forward to backend
+2. Security          — authentication, identification
+3. Rate Limiting     — protect downstream services
+4. Observability     — logging, metrics</code></pre>
+
+                    <div class="design-note">
+                        <strong>Interviewer feedback:</strong> Good prioritization. Routing first (core). Security early. Rate limiting protects downstream. Observability for ops. This shows production awareness. But you're missing some critical pieces.
+                    </div>
+
+                    <h3>What's Missing at V1?</h3>
+
+                    <table class="compare-table">
+                        <tr><th>Gap</th><th>Why It Matters</th></tr>
+                        <tr><td><strong>Load Balancing</strong></td><td>Routing ≠ load balancing. If service-A has 3 instances, <em>which one</em> gets the request? This is a core gateway responsibility.</td></tr>
+                        <tr><td><strong>Resilience</strong></td><td>"Consistent error handling" is good, but what about retries? Circuit breaker? Timeouts? These protect the system more than formatted errors.</td></tr>
+                        <tr><td><strong>Observability depth</strong></td><td>Logging + metrics isn't enough. You need <strong>distributed tracing</strong> — traceId propagated across all services for end-to-end request visibility.</td></tr>
+                        <tr><td><strong>Security granularity</strong></td><td>"Security and identification" is too broad. Interviewers expect: <strong>authentication</strong> (who are you?) vs <strong>authorization</strong> (what can you do?).</td></tr>
+                    </table>
+
+                    <h3>Refined MVP Feature Set</h3>
+                    <pre><code>1. Routing + Load Balancing
+2. Authentication (JWT / API Key validation)
+3. Rate Limiting
+4. Observability (logs + metrics + distributed tracing)
+5. Resilience (timeouts + retries + circuit breaker)</code></pre>
+
+                    <hr>
+
+                    <h2>V2: Understanding the Request Pipeline</h2>
+
+                    <p>The next evolution is understanding that a gateway isn't a single "route → forward" step. It's a <strong>pipeline of filters</strong> that process the request before and after the backend call.</p>
+
+                    <pre><code>// Naive mental model (too linear):
+Client → Gateway Entry → Route Matching → Backend → Response
+
+// Production mental model (filter chain):
+Client
+  ↓
+Gateway Entry (Netty / Servlet)
+  ↓
+Pre-Filters (Auth, Rate Limit, Logging)
+  ↓
+Route Matching
+  ↓
+Load Balancer + Service Discovery
+  ↓
+Backend Service Call
+  ↓
+Post-Filters (Logging, Response Transformation)
+  ↓
+Response to Client</code></pre>
+
+                    <div class="design-note">
+                        <strong>Key insight:</strong> Auth, rate limiting, and logging aren't random features — they're <strong>filters in a chain</strong>. Each filter has a clear position: before routing (pre-filters) or after the backend response (post-filters). This is exactly how Spring Cloud Gateway and Netflix Zuul are architected.
+                    </div>
+
+                    <hr>
+
+                    <h2>V3: Building the Core — Round Robin Load Balancer</h2>
+
+                    <p>Let's build a working gateway. We'll start with in-memory backend registration and round-robin load balancing:</p>
+
+                    <pre><code>@Component
+public class BackendServerService {
+    private final CopyOnWriteArrayList<String> servers = new CopyOnWriteArrayList<>();
+
+    public void addServer(String url) { servers.add(url); }
+    public void removeServer(String url) { servers.remove(url); }
+    public List<String> getServers() { return List.copyOf(servers); }
+}
+
+@Component
+public class RoundRobinLoadBalancer {
+    private final AtomicInteger counter = new AtomicInteger(0);
+    private final BackendServerService serverService;
+
+    public RoundRobinLoadBalancer(BackendServerService service) {
+        this.serverService = service;
+    }
+
+    public String next() {
+        List<String> servers = serverService.getServers();
+        if (servers.isEmpty()) throw new RuntimeException("No backends available");
+        int index = counter.getAndIncrement() % servers.size();
+        return servers.get(index);
+    }
+}</code></pre>
+
+                    <p>And a simple routing filter that intercepts requests:</p>
+
+                    <pre><code>@Component
+public class GatewayFilter implements Filter {
+
+    private final RoundRobinLoadBalancer lb;
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    @Override
+    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
+            throws IOException, ServletException {
+
+        HttpServletRequest request = (HttpServletRequest) req;
+        HttpServletResponse response = (HttpServletResponse) res;
+
+        String path = request.getRequestURI();
+        String backend = lb.next();
+
+        try {
+            ResponseEntity<String> backendResp = restTemplate.getForEntity(
+                backend + path, String.class
+            );
+            response.setStatus(backendResp.getStatusCodeValue());
+            response.getWriter().write(backendResp.getBody());
+        } catch (Exception e) {
+            response.setStatus(502);
+            response.getWriter().write("{\"error\":\"Bad Gateway\"}");
+        }
+    }
+}</code></pre>
+
+                    <div class="design-note">
+                        <strong>This works for a demo. But here's what's wrong:</strong>
+                    </div>
+
+                    <table class="compare-table">
+                        <tr><th>Issue</th><th>Why It Fails</th></tr>
+                        <tr><td><strong>Static server list</strong></td><td>Hardcoded addresses. What happens when instances scale up/down?</td></tr>
+                        <tr><td><strong>No health checks</strong></td><td>Dead backends still get traffic. Users hit 502 errors.</td></tr>
+                        <tr><td><strong>No weighting</strong></td><td>All instances treated equal. A 2-core instance gets same load as 16-core.</td></tr>
+                        <tr><td><strong>Not distributed</strong></td><td>Each gateway instance has its own counter. No global load distribution.</td></tr>
+                        <tr><td><strong>Blocking I/O</strong></td><td>Servlet + RestTemplate = one thread per request. At 10K concurrent, you run out of threads.</td></tr>
+                        <tr><td><strong>No resilience</strong></td><td>No timeout, no retry, no circuit breaker. A slow backend blocks the thread pool.</td></tr>
+                    </table>
+
+                    <hr>
+
+                    <h2>V4: Dynamic Backend Management + Service Discovery</h2>
+
+                    <p>Static server lists are a non-starter in production. We need <strong>dynamic registration</strong> — backends join and leave the pool at runtime.</p>
+
+                    <pre><code>@RestController
+@RequestMapping("/admin")
+public class AdminController {
+
+    private final BackendServerService serverService;
+
+    @PostMapping("/servers")
+    public ResponseEntity<String> addServer(@RequestBody ServerRequest server) {
+        serverService.addServer(server.getUrl());
+        return ResponseEntity.ok("Server added: " + server.getUrl());
+    }
+
+    @DeleteMapping("/servers")
+    public ResponseEntity<String> removeServer(@RequestBody ServerRequest server) {
+        serverService.removeServer(server.getUrl());
+        return ResponseEntity.ok("Server removed: " + server.getUrl());
+    }
+}</code></pre>
+
+                    <p>But in a truly production system, you don't manually add/remove backends. You use <strong>Service Discovery</strong>:</p>
+
+                    <pre><code>// Instead of: List<URI> servers = List.of(uri1, uri2);
+
+// Production approach:
+// - Eureka / Consul / Kubernetes DNS
+// - Gateway subscribes to registry updates
+// - Backends register on startup, deregister on shutdown
+// - Gateway always has an up-to-date view</code></pre>
+
+                    <hr>
+
+                    <h2>V5: Adding Security — But Who Owns Auth?</h2>
+
+                    <p>We add authentication to the filter chain. JWT validation happens <strong>before</strong> the request reaches any backend:</p>
+
+                    <pre><code>@Component
+public class JwtAuthFilter implements Filter {
+
+    private final JwtValidator jwtValidator;
+
+    @Override
+    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
+            throws IOException, ServletException {
+
+        HttpServletRequest request = (HttpServletRequest) req;
+        HttpServletResponse response = (HttpServletResponse) res;
+
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            response.setStatus(401);
+            return;
+        }
+
+        String token = authHeader.substring(7);
+        if (!jwtValidator.validate(token)) {
+            response.setStatus(403);
+            response.getWriter().write("{\"error\":\"Invalid token\"}");
+            return;
+        }
+
+        chain.doFilter(req, res);
+    }
+}</code></pre>
+
+                    <div class="design-note">
+                        <strong>Critical distinction:</strong> The gateway should <strong>validate</strong> tokens, not <strong>issue</strong> them. Token issuance belongs in a separate Auth Service. The gateway is a security <em>enforcement</em> point, not an identity provider. Mixing these makes the gateway a monolith.
+                    </div>
+
+                    <h3>Filter Order Matters</h3>
+                    <p>In Spring, <code>@Order</code> controls the filter chain sequence:</p>
+
+                    <pre><code>@Order(1)  // JwtAuthFilter        — first, reject unauthenticated
+@Order(2)  // RateLimitingFilter   — second, limit authenticated users
+@Order(3)  // LoggingFilter (pre)  — third, log the request
+// ... route + forward ...
+@Order(4)  // LoggingFilter (post) — after response</code></pre>
+
+                    <hr>
+
+                    <h2>V6: Resilience Layer — Circuit Breaker, Retry, Timeout</h2>
+
+                    <p>Resilience is where most homegrown gateways fail. Without it, a single slow backend can <strong>cascade failure</strong> across the entire system.</p>
+
+                    <pre><code>@Component
+public class ResilientGatewayFilter implements Filter {
+
+    private final RoundRobinLoadBalancer lb;
+    private final ResilienceConfig config;
+
+    @Override
+    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
+
+        HttpServletRequest request = (HttpServletRequest) req;
+        HttpServletResponse response = (HttpServletResponse) res;
+
+        String backend = lb.next();
+        int attempts = 0;
+        Exception lastError = null;
+
+        while (attempts < config.getMaxRetries()) {
+            try {
+                // Timeout per attempt
+                ResponseEntity<String> resp = restTemplate.exchange(
+                    backend + request.getRequestURI(),
+                    HttpMethod.GET,
+                    null,
+                    String.class
+                );
+                // Success — reset circuit breaker
+                circuitBreaker.recordSuccess(backend);
+                response.setStatus(resp.getStatusCodeValue());
+                response.getWriter().write(resp.getBody());
+                return;
+
+            } catch (TimeoutException e) {
+                lastError = e;
+                attempts++;
+                // Exponential backoff
+                Thread.sleep((long) Math.pow(2, attempts) * 100);
+
+            } catch (Exception e) {
+                lastError = e;
+                circuitBreaker.recordFailure(backend);
+                // Try next backend
+                backend = lb.next();
+                attempts++;
+            }
+        }
+
+        // All attempts failed
+        if (circuitBreaker.isOpen(backend)) {
+            response.setStatus(503);
+            response.getWriter().write("{\"error\":\"Service Unavailable\"}");
+        } else {
+            response.setStatus(504);
+            response.getWriter().write("{\"error\":\"Gateway Timeout\"}");
+        }
+    }
+}</code></pre>
+
+                    <h3>Resilience Patterns Summary</h3>
+                    <table class="compare-table">
+                        <tr><th>Pattern</th><th>What It Does</th><th>When It Activates</th></tr>
+                        <tr><td><strong>Timeout</strong></td><td>Abort request if backend doesn't respond in N ms</td><td>Every request</td></tr>
+                        <tr><td><strong>Retry</strong></td><td>Re-attempt on transient failures</td><td>Timeout, 5xx errors</td></tr>
+                        <tr><td><strong>Circuit Breaker</strong></td><td>Stop sending requests to a failing backend (fail fast)</td><td>After N consecutive failures</td></tr>
+                        <tr><td><strong>Bulkhead</strong></td><td>Limit concurrent calls to one backend (isolate failure)</td><td>Thread pool isolation</td></tr>
+                    </table>
+
+                    <hr>
+
+                    <h2>V7: Non-Blocking — WebFlux & Netty</h2>
+
+                    <p>A Servlet-based gateway creates <strong>one thread per request</strong>. At 50K concurrent connections with 5-second backend latency, you'd need <strong>50,000 threads</strong>. That's impossible — each thread consumes ~1MB stack space (50GB just for stacks).</p>
+
+                    <p>The fix: <strong>Reactive programming with Spring WebFlux</strong>:</p>
+
+                    <pre><code>@Component
+public class ReactiveGatewayFilter implements WebFilter {
+
+    private final ReactiveLoadBalancer lb;
+    private final WebClient webClient = WebClient.create();
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        String backend = lb.next();
+
+        return webClient.get()
+            .uri(backend + exchange.getRequest().getPath().value())
+            .exchangeToMono(clientResponse ->
+                clientResponse.bodyToMono(String.class)
+                    .map(body -> {
+                        exchange.getResponse().setStatusCode(
+                            clientResponse.statusCode()
+                        );
+                        return body;
+                    })
+            )
+            .flatMap(body -> exchange.getResponse()
+                .writeWith(Mono.just(
+                    exchange.getResponse().bufferFactory().wrap(body.getBytes())
+                ))
+            )
+            .timeout(Duration.ofSeconds(5))
+            .retry(3)
+            .onErrorResume(e -> {
+                exchange.getResponse().setStatusCode(HttpStatus.BAD_GATEWAY);
+                return exchange.getResponse().setComplete();
+            });
+    }
+}</code></pre>
+
+                    <div class="design-note">
+                        <strong>Why this works at scale:</strong> WebFlux uses an event loop (Netty) with a small, fixed thread pool. Instead of one-thread-per-request, it uses non-blocking I/O — threads never wait. 50K concurrent requests run on ~4 threads. This is the same architecture that powers Spring Cloud Gateway and Netflix Zuul 2.
+                    </div>
+
+                    <hr>
+
+                    <h2>V8: Distributed Rate Limiting + Observability</h2>
+
+                    <h3>Distributed Rate Limiting</h3>
+                    <p>With multiple gateway instances, rate limiting must be <strong>distributed</strong>. A local counter per instance doesn't work — the user's 100 req/min is shared across all gateways.</p>
+
+                    <pre><code>// Use Redis with a sliding window (same as our previous post)
+// Each gateway instance reads/writes to the same Redis
+// Lua script ensures atomicity across all instances</code></pre>
+
+                    <h3>Observability</h3>
+                    <p>A production gateway must emit:</p>
+
+                    <table class="compare-table">
+                        <tr><th>Signal</th><th>Purpose</th><th>Example</th></tr>
+                        <tr><td><strong>Metrics</strong></td><td>System health dashboard</td><td>Request rate, latency p50/p99, error rate, active connections</td></tr>
+                        <tr><td><strong>Structured Logs</strong></td><td>Debugging</td><td>JSON logs with traceId, userId, path, status, latency</td></tr>
+                        <tr><td><strong>Distributed Tracing</strong></td><td>End-to-end request flow</td><td>traceId propagated via headers across all services</td></tr>
+                        <tr><td><strong>Health Checks</strong></td><td>Orchestrator liveness</td><td><code>/health</code> endpoint with dependency status</td></tr>
+                    </table>
+
+                    <pre><code>// Generate traceId at gateway entry, propagate downstream
+String traceId = request.getHeader("X-Trace-Id");
+if (traceId == null) {
+    traceId = UUID.randomUUID().toString();
+}
+log.info("{\"traceId\":\"{}\",\"method\":\"{}\",\"path\":\"{}\",\"status\":\"started\"}",
+    traceId, request.getMethod(), request.getRequestURI());
+
+// Forward traceId to backend
+headers.set("X-Trace-Id", traceId);</code></pre>
+
+                    <hr>
+
+                    <h2>Final Architecture</h2>
+
+                    <p>Here's the production-grade pipeline we converged on:</p>
+
+                    <pre><code>
+Client Request
+  │
+  ▼
+┌─────────────────────────────────────────────┐
+│  Gateway Entry (Netty / WebFlux)             │
+│  - Non-blocking I/O                          │
+│  - Connection pool                           │
+├─────────────────────────────────────────────┤
+│  Pre-Filters                                 │
+│  ├── TraceId Generator (adds X-Trace-Id)     │
+│  ├── JWT Validator (authN + authZ)           │
+│  ├── Rate Limiter (Redis, sliding window)    │
+│  └── Request Logger (structured, traceId)    │
+├─────────────────────────────────────────────┤
+│  Route Matcher                               │
+│  - Path pattern → service name               │
+│  - Configurable (YAML / DB / Config Server)  │
+├─────────────────────────────────────────────┤
+│  Load Balancer + Service Discovery           │
+│  - Round robin / least connections / weighted │
+│  - Consul / Eureka / K8s DNS                 │
+│  - Health check (❌ dead backends removed)   │
+├─────────────────────────────────────────────┤
+│  Resilience Layer                            │
+│  - Timeout (per-route configurable)          │
+│  - Retry (exponential backoff, max 3)        │
+│  - Circuit Breaker (fail-fast after N errors)│
+│  - Bulkhead (max concurrent per backend)     │
+├─────────────────────────────────────────────┤
+│  Backend Call (WebClient, non-blocking)      │
+├─────────────────────────────────────────────┤
+│  Post-Filters                                │
+│  ├── Response Logger                         │
+│  ├── Response Transformer                    │
+│  └── Metrics Recorder                        │
+└─────────────────────────────────────────────┘
+  │
+  ▼
+Response to Client</code></pre>
+
+                    <hr>
+
+                    <h2>Summary: The Evolution</h2>
+
+                    <table class="compare-table">
+                        <tr><th>Version</th><th>What Changed</th><th>Why</th></tr>
+                        <tr><td>V1</td><td>MVP features brainstorm</td><td>Establish priorities — routing → auth → resilience</td></tr>
+                        <tr><td>V2</td><td>Linear proxy → filter chain pipeline</td><td>Auth/rate-limit/logging aren't features, they're filters with positions</td></tr>
+                        <tr><td>V3</td><td>Round-robin LB + static server list</td><td>Working code, but fails at scale (static, blocking, no health checks)</td></tr>
+                        <tr><td>V4</td><td>Dynamic backend management + service discovery</td><td>Servers join/leave at runtime. Consul/Eureka for production.</td></tr>
+                        <tr><td>V5</td><td>Auth filter — gateway validates, doesn't issue</td><td>Separation of concerns. Gateway = enforcement, Auth Service = issuance.</td></tr>
+                        <tr><td>V6</td><td>Resilience: timeout, retry, circuit breaker, bulkhead</td><td>Prevents cascading failure. A slow backend shouldn't bring down the gateway.</td></tr>
+                        <tr><td>V7</td><td>Blocking → non-blocking (WebFlux + Netty)</td><td>10K concurrent with 4 threads instead of 10K threads. Scalable.</td></tr>
+                        <tr><td>V8</td><td>Distributed rate limiting + observability</td><td>Redis for shared state. traceId, metrics, structured logging for ops.</td></tr>
+                    </table>
+
+                    <blockquote>
+                        <strong>Interview tip:</strong> If asked "design an API gateway," don't jump to the final architecture. Walk through the evolution. Show you understand <em>why</em> each layer exists. Interviewers care more about your reasoning through tradeoffs than the final diagram.
+                    </blockquote>
+
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- Back to Top -->
+    <div class="back-to-top-wrapper">
+        <a href="#" class="back-to-top" aria-label="Back to top">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+        </a>
+    </div>
+
+</body>
+</html>
