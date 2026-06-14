@@ -9,9 +9,9 @@ window.SETblog = `
                     <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
                 </svg>
             </div>
-            <h3>Coming Soon!</h3>
-            <p>I'm working on writing about backend engineering, distributed systems, and lessons from building at scale. Stay tuned!</p>
-            <a href="mailto:sg36.sagargupta26@gmail.com?subject=Blog%20Notification" class="btn btn-secondary">Notify Me</a>
+            <h3>Read My Writings</h3>
+            <p>Thoughts on backend engineering, distributed systems, and lessons from building at scale.</p>
+            <a href="/blogs/" class="btn btn-primary">Visit Blog</a>
         </div>
     </div>
 </section>`;

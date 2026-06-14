@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Deep dive into building a URL shortener with analytics using Spring Boot, Redis, MySQL, and AWS.">
+    <meta property="og:title" content="Building a URL Shortener with Analytics — Architecture Deep Dive">
+    <meta property="og:description" content="Caching strategies with Redis, sub-50ms redirects, MySQL schema design, and AWS deployment.">
+    <meta property="og:type" content="article">
+    <title>Building a URL Shortener with Analytics — Sagar Gupta</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../../styles/main.css">
+    <link rel="stylesheet" href="../../styles/blog.css">
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav class="navbar scrolled" id="navbar">
+        <div class="nav-container container">
+            <a href="../../#hero" class="nav-logo">SG</a>
+            <ul class="nav-links">
+                <li><a href="../../#hero" class="nav-link">Home</a></li>
+                <li><a href="../../#about" class="nav-link">About</a></li>
+                <li><a href="../../#experience" class="nav-link">Experience</a></li>
+                <li><a href="../../#skills" class="nav-link">Skills</a></li>
+                <li><a href="../../#projects" class="nav-link">Projects</a></li>
+                <li><a href="../../#education" class="nav-link">Education</a></li>
+                <li><a href="/blogs/" class="nav-link active">Blog</a></li>
+                <li><a href="../../#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Blog Post -->
+    <section class="blog-page">
+        <div class="container">
+            <article class="blog-post">
+                <a href="/blogs/" class="back-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    All Posts
+                </a>
+
+                <header class="blog-post-header">
+                    <h1>Building a URL Shortener with Analytics — Architecture Deep Dive</h1>
+                    <div class="blog-post-meta">June 14, 2026 &bull; 8 min read &bull; Spring Boot, Redis, MySQL, AWS</div>
+                </header>
+
+                <div class="blog-post-body">
+
+                    <p>URL shorteners seem simple on the surface: take a long URL, generate a short code, redirect. But building one that handles <strong>millions of redirects</strong> with analytics, caching, and sub-50ms latency is a different beast. This post walks through the architecture I built for a production-grade URL shortener using Spring Boot, Redis, MySQL, and AWS EC2.</p>
+
+                    <h2>System Requirements</h2>
+                    <ul>
+                        <li>Generate short, unique codes for any valid URL</li>
+                        <li>Redirect from short URL to original URL in <strong>under 50ms</strong></li>
+                        <li>Track click analytics (referrer, user agent, timestamp, IP)</li>
+                        <li>Handle high throughput with <strong>Redis caching</strong></li>
+                        <li>Deploy on AWS EC2 with CloudWatch monitoring</li>
+                    </ul>
+
+                    <h2>Short Code Generation</h2>
+                    <p>The core challenge is generating unique, collision-free short codes. I used a <strong>Base62 encoding</strong> approach: take a unique incrementing ID (from MySQL auto-increment or a Snowflake-like ID), encode it to Base62 (0-9, a-z, A-Z), and use the result as the short code.</p>
+
+                    <pre><code>// Base62 encoding in Java
+public String encode(long id) {
+    char[] chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
+    StringBuilder sb = new StringBuilder();
+    while (id > 0) {
+        sb.append(chars[(int) (id % 62)]);
+        id /= 62;
+    }
+    return sb.reverse().toString();
+}</code></pre>
+
+                    <p>Why Base62? It's URL-safe, compact (7 characters = ~3.5 trillion combinations), and doesn't need special encoding. A 7-char code like <code>3dK9f2A</code> maps to a unique long URL in the database.</p>
+
+                    <h2>Caching with Redis</h2>
+                    <p>The redirect path is simple: someone hits <code>/3dK9f2A</code>, the server looks up the long URL, and issues a 301 redirect. But if every request hits MySQL, latency spikes under load.</p>
+
+                    <p><strong>Redis sits between the API and MySQL:</strong></p>
+
+                    <pre><code>// Redirect flow
+GET /3dK9f2A
+
+1. Check Redis     → cache hit? return 301 (1-5ms)
+2. Check MySQL     → found? populate Redis, return 301 (10-30ms)
+3. Not found       → return 404</code></pre>
+
+                    <p>I set Redis TTL to <strong>24 hours</strong> for hot URLs and used <strong>write-through caching</strong> — every new short URL is written to both MySQL and Redis simultaneously. This achieved <strong>sub-5ms redirects</strong> for cached URLs and sub-50ms even on cache-miss.</p>
+
+                    <h2>MySQL Schema</h2>
+                    <p>A clean, denormalized schema optimized for reads:</p>
+
+                    <pre><code>CREATE TABLE urls (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    short_code VARCHAR(10) UNIQUE NOT NULL,
+    long_url TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NULL,
+    INDEX idx_short_code (short_code)
+);
+
+CREATE TABLE clicks (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    short_code VARCHAR(10) NOT NULL,
+    referrer VARCHAR(512),
+    user_agent VARCHAR(512),
+    ip_hash VARCHAR(64),
+    clicked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_short_code_clicks (short_code, clicked_at)
+);</code></pre>
+
+                    <blockquote>Separating <code>urls</code> and <code>clicks</code> into different tables keeps the redirect query lightweight. The clicks table can grow to millions of rows without slowing down redirects.</blockquote>
+
+                    <h2>AWS Deployment</h2>
+                    <p>Deployed on <strong>AWS EC2</strong> (t3.medium) running:</p>
+                    <ul>
+                        <li><strong>Spring Boot</strong> fat JAR on port 8080 behind Nginx reverse proxy</li>
+                        <li><strong>Redis</strong> on the same instance (later migrated to ElastiCache for multi-instance setups)</li>
+                        <li><strong>MySQL</strong> via RDS for managed backups and replication</li>
+                        <li><strong>CloudWatch</strong> for request latency, error rate, and cache hit ratio dashboards</li>
+                    </ul>
+
+                    <p>The entire stack costs ~$45/month on a single EC2 instance with RDS.</p>
+
+                    <h2>Analytics Dashboard</h2>
+                    <p>Every click is logged with referrer, user agent, hashed IP (respecting privacy), and timestamp. A simple Spring Boot endpoint aggregates this data:</p>
+
+                    <ul>
+                        <li><strong>Click count</strong> over time (hourly/daily breakdown)</li>
+                        <li><strong>Top referrers</strong> — where traffic comes from</li>
+                        <li><strong>Browser/OS breakdown</strong> — parsed from user agent</li>
+                        <li><strong>Geo distribution</strong> — rough estimate from IP hash</li>
+                    </ul>
+
+                    <h2>Key Takeaways</h2>
+                    <ol>
+                        <li><strong>Cache aggressively.</strong> Redis took redirect latency from 30ms → 5ms and cut MySQL load by 90%.</li>
+                        <li><strong>Pre-compute IDs.</strong> Don't generate short codes on redirect — encode them at creation time and store the mapping.</li>
+                        <li><strong>Separate reads from writes.</strong> The clicks table is append-only and never queried during redirect. This isolation is critical.</li>
+                        <li><strong>301 vs 302.</strong> Use 301 (permanent) for analytics — browsers cache it, meaning repeat visitors don't hit your server. But if you need per-click analytics accuracy, use 302 (temporary).</li>
+                    </ol>
+
+                    <hr>
+
+                    <p>This project was a great exercise in thinking through <strong>cache strategies, data modeling, and deployment tradeoffs</strong>. The full source code is on my GitHub. If you're building something similar, reach out — I'd love to chat about it!</p>
+
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- Back to Top -->
+    <div class="back-to-top-wrapper">
+        <a href="#" class="back-to-top" aria-label="Back to top">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+        </a>
+    </div>
+
+</body>
+</html>
