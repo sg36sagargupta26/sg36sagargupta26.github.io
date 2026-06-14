@@ -1,0 +1,102 @@
+\documentclass[10pt,a4paper]{article}
+
+% --------------------
+% Packages
+% --------------------
+\usepackage[left=1.5cm,right=1.5cm,top=1.5cm,bottom=1.5cm]{geometry}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\usepackage{parskip}
+
+% --------------------
+% Formatting
+% --------------------
+\setlength{\parindent}{0pt}
+\pagenumbering{gobble}
+
+\titleformat{\section}
+  {\large\bfseries}
+  {}
+  {0pt}
+  {}
+  [\titlerule]
+
+\renewcommand{\labelitemi}{--}
+
+% --------------------
+% Document
+% --------------------
+\begin{document}
+
+% --------------------
+% Header
+% --------------------
+\begin{center}
+    {\LARGE \textbf{Sagar Gupta}} \\[4pt]
+    \href{mailto:sg36.sagargupta26@gmail.com}{sg36.sagargupta26@gmail.com}\texttt{ | }+91-7872827780\texttt{ | }\href{https://linkedin.com/in/sagar-gupta-02091783}{linkedin.com/in/sagar-gupta-02091783}
+\end{center}
+
+% --------------------
+% Summary
+% --------------------
+\section*{Professional Summary}
+ Backend Engineer with 6+ years of experience designing and building secure, scalable, high-availability backend systems using Java, Spring Boot, REST APIs, Microservices, and AWS. Experienced in authentication platforms, cloud migration, CI/CD modernization, and system modernization within regulated banking environments.
+
+% --------------------
+% Skills
+% --------------------
+\section*{Technical Skills}
+\textbf{Languages:} Java 8, Java 17, JS(basic), Python(basic) \\
+\textbf{Frameworks and Technologies:} Spring, Spring Boot, REST APIs, React \\
+\textbf{Architecture:} Microservices, Cloud Native Architecture, Secure Authentication Systems, High Availability Systems \\
+\textbf{Databases:} SQL (MySQL)\\
+\textbf{Cloud \& DevOps:} AWS, CI/CD, Git, GitLab CI, Jenkins, Docker(basic) \\
+\textbf{Engineering Practices:} System Modernization, Cloud Migration, Mutation Testing, Technical Debt Reduction
+
+% --------------------
+% Experience
+% --------------------
+\section*{Professional Experience}
+
+\textbf{Barclays} \hfill Pune \\
+\textit{Backend Engineer} \hfill Jul 2019 -- Present
+\begin{itemize}[leftmargin=*]
+    \item Delivered app-based 2FA for Barclays Online Banking, replacing legacy PINsentry hardware. Improved authentication speed and user experience via push-based real-time approvals, delivering ~£6M savings over 5 years.
+    \item Led CI/CD modernization by migrating build and deployment pipelines from Jenkins to GitLab CI, introducing automated quality, security, and compliance gates that improved release stability and developer productivity.
+    \item Led modernization of legacy Java and Spring Boot services, improving application performance by 50\% (3s-1.5s) while maintaining backward compatibility and supporting scalable microservices adoption.
+    \item Implemented mutation testing using PIT (Java) and Stryker (React), strengthening test effectiveness and improving defect detection across backend and frontend applications.
+    \item Created a separate journey to support accessibility and vulnerability requirements, enabling customers to receive bank statements in Braille, large print, and audio formats.
+    \item Implemented a “Go Paperless” interstitial page prompting customers to switch from paper statements to digital delivery, reducing paper costs by ~£200K/year.
+    \item Led cloud migration of authentication microservices to AWS, implementing cloud-native stateless services that improved scalability, high availability, and deployment reliability.
+    \item Enabled reuse of an existing React application by exposing stable, backward-compatible backend APIs and integrating them into a mobile WebView flow.
+\end{itemize}
+
+\vspace{4pt}
+
+\textbf{TCG Digital} \hfill Kolkata \\
+\textit{Mobile Developer Intern} \hfill Mar 2018 -- May 2018
+\begin{itemize}[leftmargin=*]
+    \item Developed a mobile application using React Native to visualize import-export data across major Indian ports.
+\end{itemize}
+
+
+% --------------------
+% Projects
+% --------------------
+\section*{Academic \& Personal Projects}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{New Product Sales Forecasting (Masters Project):} Implemented data pipelines and analytical models in Python to forecast product sales by combining historical data with sentiment analysis.
+    \item \textbf{URL Shortener with Analytics:} Built a URL shortener with analytics using Spring Boot, Redis, and MySQL. Designed caching and lookup strategies achieving sub-50ms redirect latency and deployed on AWS EC2 with CloudWatch monitoring.
+\end{itemize}
+
+
+% --------------------
+% Education
+% --------------------
+\section*{Education}
+\textbf{Indian Institute of Technology, Kharagpur}  \\
+Dual Degree (B.Tech + M.Tech), Industrial Engineering \hfill 2014 -- 2019 \\
+CGPA: 7.39/10
+
+\end{document}
