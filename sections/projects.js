@@ -26,18 +26,6 @@ window.SETprojects = `
                     </div>
                 </div>
             </article>
-            <article class="project-card reveal">
-                <div class="project-card-content">
-                    <h3 class="project-title">AI-Powered Job Matcher — Chrome Extension</h3>
-                    <p class="project-desc">Chrome extension that auto-detects LinkedIn & Naukri job pages, extracts descriptions, and uses <strong>DeepSeek V3</strong> to compare them against my CV. Results save to Google Sheets via Apps Script Web App — all client-side, <strong>~$1.50/month</strong> operating cost.</p>
-                    <div class="project-tags">
-                        <span>Chrome Extension</span>
-                        <span>DeepSeek V3</span>
-                        <span>Google Apps Script</span>
-                        <span>JavaScript</span>
-                    </div>
-                </div>
-            </article>
         </div>
     </div>
 </section>`;
