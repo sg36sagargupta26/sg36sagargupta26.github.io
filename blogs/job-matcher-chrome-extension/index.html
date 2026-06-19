@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Building a Chrome extension that compares LinkedIn & Naukri job descriptions against your CV using DeepSeek V3 AI and saves matches to Google Sheets.">
+    <meta property="og:title" content="Building an AI-Powered LinkedIn & Naukri Job Matcher — Chrome Extension">
+    <meta property="og:description" content="Auto-detect job pages, extract descriptions, run AI-powered CV matching via DeepSeek V3, and save to Google Sheets — all client-side, ~$1.50/month.">
+    <meta property="og:type" content="article">
+    <title>AI-Powered Job Matcher — Chrome Extension — Sagar Gupta</title>
+
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="../../styles/main.css">
+    <link rel="stylesheet" href="../../styles/blog.css">
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav class="navbar scrolled" id="navbar">
+        <div class="nav-container container">
+            <a href="../../#hero" class="nav-logo">SG</a>
+            <ul class="nav-links">
+                <li><a href="../../#hero" class="nav-link">Home</a></li>
+                <li><a href="../../#about" class="nav-link">About</a></li>
+                <li><a href="../../#experience" class="nav-link">Experience</a></li>
+                <li><a href="../../#skills" class="nav-link">Skills</a></li>
+                <li><a href="../../#projects" class="nav-link">Projects</a></li>
+                <li><a href="../../#education" class="nav-link">Education</a></li>
+                <li><a href="/blogs/" class="nav-link active">Blog</a></li>
+                <li><a href="../../#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Blog Post -->
+    <section class="blog-page">
+        <div class="container">
+            <article class="blog-post">
+                <a href="/blogs/" class="back-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                    All Posts
+                </a>
+
+                <header class="blog-post-header">
+                    <h1>Building an AI-Powered LinkedIn & Naukri Job Matcher — Chrome Extension</h1>
+                    <div class="blog-post-meta">June 2025 &bull; 10 min read &bull; Chrome Extension, DeepSeek V3, Google Sheets</div>
+                </header>
+
+                <div class="blog-post-body">
+
+                    <p>Job hunting is tedious. You scroll through dozens of listings, copy-paste descriptions, and manually compare them against your CV. I built a Chrome extension that <strong>automates the entire workflow</strong> — extracting job descriptions, running AI-powered CV matching via DeepSeek V3, and saving results to Google Sheets. All client-side, zero ban risk, for ~$1.50/month.</p>
+
+                    <h2>The Problem</h2>
+                    <p>LinkedIn and Naukri show hundreds of jobs, but there's no built-in way to check how well a role matches <em>your</em> specific skills. You either maintain a manual spreadsheet (time-consuming) or rely on gut feel (error-prone). I wanted something that would:</p>
+                    <ul>
+                        <li>Auto-detect when I'm on a job posting page</li>
+                        <li>Extract the job description without copy-pasting</li>
+                        <li>Compare it intelligently against my CV using an LLM</li>
+                        <li>Save matched jobs to a spreadsheet I can review later</li>
+                    </ul>
+
+                    <h2>Architecture</h2>
+                    <p>The extension uses <strong>Chrome Manifest V3</strong> with three components:</p>
+
+                    <table>
+                        <tr><th>Component</th><th>Role</th></tr>
+                        <tr><td>Content Script</td><td>Injected into LinkedIn/Naukri job pages. Detects URL patterns, extracts JD via site-specific DOM selectors, renders a floating blue button + analysis panel.</td></tr>
+                        <tr><td>Background Service Worker</td><td>Handles API calls to DeepSeek for AI analysis and Google Apps Script Web App for saving to Sheets. Keeps API keys in chrome.storage.</td></tr>
+                        <tr><td>Popup UI</td><td>Settings panel for configuring the DeepSeek API key and Google Sheets Web App URL, with a test button for validation.</td></tr>
+                    </table>
+
+                    <h2>Data Flow</h2>
+                    <pre><code>Job Page → Content Script (DOM extraction) → Background Worker
+                                                      ├── DeepSeek API (CV vs JD analysis)
+                                                      └── Google Apps Script (append row to Sheet)
+
+AI Response (structured JSON):
+  matchPercentage: 75%
+  matchedSkills:   [Java, Spring Boot, AWS, Redis, ...]
+  missingSkills:   [Kubernetes, Terraform]
+  strengths:       ["6+ years Java/Spring Boot", ...]
+  gaps:            ["No K8s production experience"]
+  summary:         "Strong backend match, minor cloud orchestration gaps"</code></pre>
+
+                    <h2>Job Extraction</h2>
+                    <p>Site-specific DOM selectors extract these fields from LinkedIn and Naukri job pages:</p>
+                    <ul>
+                        <li><strong>Title</strong> — from h1 / title elements</li>
+                        <li><strong>Company</strong> — from company name links</li>
+                        <li><strong>Location</strong> — from location spans/anchors</li>
+                        <li><strong>Posted date</strong> — from date elements</li>
+                        <li><strong>Description</strong> — from the job description block, cleaned of "About the job" prefixes and collapsed newlines</li>
+                        <li><strong>URL</strong> — <code>window.location.href</code></li>
+                    </ul>
+
+                    <h2>SPA-Aware Injection</h2>
+                    <p>LinkedIn is a Single Page Application — navigating between jobs doesn't trigger page reloads. This posed a challenge: the extension needs to detect when the user moves to a new job and re-inject the floating button + analysis panel.</p>
+
+                    <p>Solution: the content script polls <code>window.location.href</code> every second. On URL change, it removes the old overlay and injects a fresh one, resetting all state (<code>analysisResult</code>, <code>isAnalyzing</code>, <code>isSaving</code>). A <code>MutationObserver</code> also watches for LinkedIn removing the overlay during DOM updates and re-injects it.</p>
+
+                    <h2>AI Analysis — Why DeepSeek V3?</h2>
+                    <p>I chose DeepSeek V3 over GPT-4 for one reason: cost. Here's the breakdown:</p>
+
+                    <table>
+                        <tr><th>Metric</th><th>DeepSeek V3</th><th>GPT-4</th></tr>
+                        <tr><td>Input cost (per 1M tokens)</td><td>$0.27</td><td>$30.00</td></tr>
+                        <tr><td>Output cost (per 1M tokens)</td><td>$1.10</td><td>$60.00</td></tr>
+                        <tr><td>Per-analysis cost</td><td>~$0.001</td><td>~$0.06</td></tr>
+                        <tr><td>100 jobs/day / month</td><td>~$1.50</td><td>~$90.00</td></tr>
+                    </table>
+
+                    <p>For structured JSON output (match percentage, skill lists, summary), DeepSeek V3 provides comparable quality at roughly <strong>1/60th the cost</strong>. The API call sends ~2,400 tokens per analysis (1,600 for JD + 600 for CV + 200 prompt overhead) with <code>temperature: 0.2</code> for consistent results.</p>
+
+                    <div class="design-note">
+                        <strong>Design Decision:</strong> The prompt instructs DeepSeek to return strictly structured JSON. This makes the response parseable and avoids LLM hallucination on format. The extension validates the JSON before rendering.
+                    </div>
+
+                    <h2>Google Sheets Integration</h2>
+                    <p>Instead of building a backend with OAuth, I used a <strong>Google Apps Script Web App</strong> deployed with "Anyone" access. The extension POSTs job data as <code>text/plain</code> to avoid CORS preflight (which would add latency and complexity).</p>
+
+                    <p>The Apps Script (<code>apps-script.gs</code>) parses the JSON payload and appends a row with 11 columns:</p>
+
+                    <table>
+                        <tr><th>Column</th><th>Description</th></tr>
+                        <tr><td>Title</td><td>Job title</td></tr>
+                        <tr><td>Company</td><td>Company name</td></tr>
+                        <tr><td>Location</td><td>Job location</td></tr>
+                        <tr><td>URL</td><td>Direct link to job posting</td></tr>
+                        <tr><td>Posted</td><td>Posted date</td></tr>
+                        <tr><td>Description</td><td>First 5,000 chars of cleaned JD</td></tr>
+                        <tr><td>Match %</td><td>AI-computed match percentage</td></tr>
+                        <tr><td>Matched Skills</td><td>CV skills found in JD</td></tr>
+                        <tr><td>Missing Skills</td><td>JD skills not in CV</td></tr>
+                        <tr><td>Summary</td><td>One-line AI assessment</td></tr>
+                        <tr><td>Saved At</td><td>Timestamp</td></tr>
+                    </table>
+
+                    <p>This gives a <strong>searchable, sortable job tracker</strong> that lives in Google Drive — no database, no server, no cost.</p>
+
+                    <h2>Extension Permissions</h2>
+                    <table>
+                        <tr><th>Permission</th><th>Reason</th></tr>
+                        <tr><td><code>storage</code></td><td>Save API key + Sheets URL</td></tr>
+                        <tr><td><code>linkedin.com</code></td><td>Inject content script on job pages</td></tr>
+                        <tr><td><code>naukri.com</code></td><td>Inject content script on Naukri job pages</td></tr>
+                        <tr><td><code>api.deepseek.com</code></td><td>AI analysis API calls</td></tr>
+                        <tr><td><code>script.google.com</code></td><td>Sheets web app calls</td></tr>
+                    </table>
+
+                    <h2>Troubleshooting Common Issues</h2>
+                    <p>From real usage, here are the most common issues and fixes:</p>
+
+                    <table>
+                        <tr><th>Issue</th><th>Fix</th></tr>
+                        <tr><td>Blue button doesn't appear</td><td>Ensure you're on a LinkedIn <code>/jobs/view/*</code> page or Naukri job detail page. Refresh if the page hasn't fully loaded.</td></tr>
+                        <tr><td>"Could not extract job description"</td><td>Scroll down to trigger lazy-load of the description. New LinkedIn layouts may require selector updates.</td></tr>
+                        <tr><td>Save to Sheet fails</td><td>Verify the Apps Script Web App URL in extension settings. Re-deploy with "Anyone" access if needed.</td></tr>
+                        <tr><td>Panel doesn't reset between jobs</td><td>The panel polls URL every 1s — wait a moment. If LinkedIn's DOM removes it, MutationObserver re-injects it.</td></tr>
+                    </table>
+
+                    <h2>Cost & Scale</h2>
+                    <p>Total monthly operating cost: <strong>~$1.50</strong> (DeepSeek API only). Google Sheets is free, the Chrome extension runs locally, and there's no server to maintain. At 200+ analyses per day, cost stays under $3/month.</p>
+
+                    <h2>Project Structure</h2>
+                    <pre><code>extension/
+├── manifest.json          # Chrome Manifest V3 config
+├── background.js          # API calls (DeepSeek + Sheets)
+├── content.js             # Injected into job pages
+├── content.css            # Floating panel UI
+├── cv-data.js             # Your CV data (pre-loaded)
+├── popup.html             # Settings popup
+├── popup.js               # Settings + Test logic
+├── popup.css              # Popup styling
+└── icons/                 # Extension icons
+
+google-sheet/
+└── apps-script.gs         # Google Apps Script (deploy as Web App)</code></pre>
+
+                    <p>Source: <a href="https://github.com/sg36sagargupta26/job-listing-linkedIn" target="_blank" rel="noopener noreferrer">github.com/sg36sagargupta26/job-listing-linkedIn</a></p>
+
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- Back to Top -->
+    <div class="back-to-top-wrapper">
+        <a href="#" class="back-to-top" aria-label="Back to top">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+        </a>
+    </div>
+
+</body>
+</html>
